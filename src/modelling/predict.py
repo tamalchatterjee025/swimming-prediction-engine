@@ -104,6 +104,12 @@ def predict_race(event_key: str, athlete_ids: list, as_of_date: dt.date = None,
         sim_df["season_best"] = sim_df["athlete_id"].apply(
             lambda aid: explanations[aid]["features"]["season_best"]
         )
+        sim_df["season_best_label"] = sim_df["athlete_id"].apply(
+            lambda aid: explanations[aid]["features"]["season_best_label"]
+        )
+        sim_df["season_best_is_current"] = sim_df["athlete_id"].apply(
+            lambda aid: explanations[aid]["features"]["season_best_is_current"]
+        )
         sim_df["consistency_label"] = sim_df["athlete_id"].apply(
             lambda aid: _consistency_label(explanations[aid]["features"]["consistency_std"])
         )

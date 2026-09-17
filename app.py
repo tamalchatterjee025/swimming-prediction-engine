@@ -33,6 +33,16 @@ with st.sidebar:
     gender_label = st.radio("Gender", options=list(GENDER_CODES.keys()), horizontal=True)
     gender_code = GENDER_CODES[gender_label]
     competition_name = st.text_input("Competition (label only, e.g. 'Asian Games 2026 Final')", value="")
+    race_date = st.date_input(
+        "Race date",
+        value=dt.date.today(),
+        help=(
+            "The model only uses performances strictly BEFORE this date — exactly like a real "
+            "pre-race prediction. Defaults to today. Set this to a past date to reconstruct a "
+            "historical final (e.g. 2024-07-31 for the Paris 2024 100m Free final) using only the "
+            "data that would have been available before that race."
+        ),
+    )
     st.divider()
     st.caption(f"Model version: `{MODEL_VERSION}`  ·  Simulations per run: {N_SIMULATIONS:,}")
 
@@ -59,15 +69,15 @@ if "finalists" not in st.session_state:
 col_search, col_current = st.columns([2, 1])
 
 with col_search:
-    query = st.text_input("Search athlete by name", value="")
+    query = st.text_input("Search athlete by name (optional — narrows the list below)", value="")
     filtered = search_athletes(event_key, gender=gender_code, query=query) if query else athletes_df
-    display = filtered.head(25).copy()
+    display = filtered.head(500).copy()  # effectively unlimited for current dataset sizes (~150/gender)
     display["label"] = display.apply(
         lambda r: f"{r['athlete_name']} ({r['country']}) — PB {r['personal_best']:.2f}s", axis=1
     )
     options = display["athlete_id"].tolist()
     picked = st.multiselect(
-        "Matching athletes (top 25 shown by PB)",
+        f"Matching athletes ({len(display)} shown, sorted by PB — you can also type in this box to filter)",
         options=options,
         format_func=lambda aid: display.set_index("athlete_id").loc[aid, "label"],
     )
@@ -97,7 +107,7 @@ st.divider()
 
 if st.button("🏁 Run Prediction", type="primary", disabled=len(st.session_state.finalists) < 2):
     with st.spinner(f"Running {N_SIMULATIONS:,} race simulations..."):
-        result = predict_race(event_key, st.session_state.finalists, competition_name=competition_name)
+        result = predict_race(event_key, st.session_state.finalists, as_of_date=race_date, competition_name=competition_name)
         st.session_state.last_result = result
         try:
             save_prediction_run(result, event_key, competition_name)
@@ -146,7 +156,11 @@ if "last_result" in st.session_state:
         with st.expander(f"{r['athlete_name']} ({r['country']}) — Expected {r['expected_time']:.2f}s"):
             c1, c2 = st.columns(2)
             c1.write(f"**Recent form range:** {r['recent_form_range']}")
-            c1.write(f"**Season best:** {r['season_best']:.2f}s" if pd.notna(r['season_best']) else "**Season best:** n/a")
+            if pd.notna(r['season_best']):
+                season_tag = "" if r['season_best_is_current'] else f" (most recent completed season, {r['season_best_label']} — no races yet this season)"
+                c1.write(f"**Season best:** {r['season_best']:.2f}s{season_tag}")
+            else:
+                c1.write("**Season best:** n/a (no races on file in this or the prior season)")
             c2.write(f"**Recent consistency:** {r['consistency_label']}")
             c2.write(f"**Trend:** {r['trend_label']}")
             st.caption(f"Based on {r['n_races_used']} race(s) before the as-of date. Uncertainty (std dev): {r['time_std']:.2f}s")

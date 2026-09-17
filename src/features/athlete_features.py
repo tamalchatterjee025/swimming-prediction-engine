@@ -23,6 +23,11 @@ def _season_start(as_of: dt.date) -> dt.date:
     return dt.date(year, SEASON_START_MONTH, 1)
 
 
+def _season_label(season_start_date: dt.date) -> str:
+    end_year = season_start_date.year + 1
+    return f"{season_start_date.year}-{str(end_year)[-2:]}"
+
+
 def filter_as_of(perf_df: pd.DataFrame, as_of_date: dt.date) -> pd.DataFrame:
     """Only performances strictly before as_of_date -- the leakage guard."""
     df = perf_df.copy()
@@ -42,12 +47,37 @@ def recent_weighted_time(df_sorted_desc: pd.DataFrame, weights=None):
 
 
 def season_best(df_sorted_desc: pd.DataFrame, as_of_date: dt.date):
-    """Component B: best time within the current season so far."""
-    start = _season_start(as_of_date)
-    season_df = df_sorted_desc[df_sorted_desc["competition_date"] >= start]
-    if season_df.empty:
-        return None
-    return float(season_df["time_seconds"].min())
+    """
+    Component B: best time within the current season so far.
+
+    Falls back one season back if the current season has no races yet (e.g.
+    early September, right after the season boundary, before an athlete's
+    long-course season has started) -- otherwise this reads as "no data"
+    for almost every athlete for a large chunk of the calendar, which isn't
+    useful. The fallback is clearly labelled (`season_best_is_current=False`,
+    `season_best_label` names the season it actually came from) so the UI
+    never silently presents a stale season as the current one.
+    """
+    current_start = _season_start(as_of_date)
+    current_df = df_sorted_desc[df_sorted_desc["competition_date"] >= current_start]
+    if not current_df.empty:
+        return {
+            "value": float(current_df["time_seconds"].min()),
+            "is_current": True,
+            "label": _season_label(current_start),
+        }
+
+    prior_start = dt.date(current_start.year - 1, current_start.month, current_start.day)
+    prior_df = df_sorted_desc[
+        (df_sorted_desc["competition_date"] >= prior_start) & (df_sorted_desc["competition_date"] < current_start)
+    ]
+    if prior_df.empty:
+        return {"value": None, "is_current": False, "label": None}
+    return {
+        "value": float(prior_df["time_seconds"].min()),
+        "is_current": False,
+        "label": _season_label(prior_start),
+    }
 
 
 def personal_best(df_sorted_desc: pd.DataFrame):
@@ -124,11 +154,14 @@ def build_athlete_features(perf_df: pd.DataFrame, athlete_id: str, as_of_date: d
     df = filter_as_of(ath_df, as_of_date)
 
     n_races = len(df)
+    season = season_best(df, as_of_date)
     feats = {
         "athlete_id": athlete_id,
         "n_races": n_races,
         "recent_weighted_time": recent_weighted_time(df),
-        "season_best": season_best(df, as_of_date),
+        "season_best": season["value"],
+        "season_best_is_current": season["is_current"],
+        "season_best_label": season["label"],
         "personal_best": personal_best(df),
         "consistency_std": consistency_std(df),
         "trend_slope": trend_slope(df),

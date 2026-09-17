@@ -53,7 +53,12 @@ feats = feats_result["features"]
 
 m1, m2, m3, m4 = st.columns(4)
 m1.metric("Personal Best", f"{feats['personal_best']:.2f}s" if feats['personal_best'] else "n/a")
-m2.metric("Season Best", f"{feats['season_best']:.2f}s" if feats['season_best'] else "n/a")
+season_label = f"Season Best ({feats['season_best_label']})" if feats.get("season_best_label") else "Season Best"
+if not feats.get("season_best_is_current", True) and feats["season_best"]:
+    season_label += " *"
+m2.metric(season_label, f"{feats['season_best']:.2f}s" if feats['season_best'] else "n/a")
+if feats["season_best"] and not feats.get("season_best_is_current", True):
+    st.caption("* No races yet this season — showing the most recently completed season's best instead.")
 m3.metric("Recent Weighted Time", f"{feats['recent_weighted_time']:.2f}s" if feats['recent_weighted_time'] else "n/a")
 m4.metric("Latest AQUA Points (avg recent)", f"{feats['aqua_points_avg']:.0f}" if feats['aqua_points_avg'] else "n/a")
 
