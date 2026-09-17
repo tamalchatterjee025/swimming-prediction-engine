@@ -50,7 +50,7 @@ class IngestionError(Exception):
     pass
 
 
-def _build_url(event: EventConfig, gender_code: str, year: str, page_size: int) -> str:
+def _build_url(event: EventConfig, gender_code: str, year: str, page_size: int, region_id: str = "") -> str:
     params = {
         "gender": gender_code,
         "distance": event.distance,
@@ -60,7 +60,7 @@ def _build_url(event: EventConfig, gender_code: str, year: str, page_size: int) 
         "startDate": "",
         "endDate": "",
         "timesMode": "ALL_TIMES",
-        "regionId": "",
+        "regionId": region_id,
         "countryId": "",
         "pageSize": page_size,
     }
@@ -89,9 +89,19 @@ def _fetch_via_curl(url: str) -> str:
 
 
 def fetch_rankings_csv(event: EventConfig, gender_code: str, year: str = "", page_size: int = 200,
-                        max_retries: int = 3) -> str:
-    """Fetch raw CSV text for one (event, gender, year) slice. Returns CSV text."""
-    url = _build_url(event, gender_code, year, page_size)
+                        max_retries: int = 3, region_id: str = "") -> str:
+    """
+    Fetch raw CSV text for one (event, gender, year) slice. Returns CSV text.
+
+    `region_id` (e.g. "ASIA") narrows the ranking to swims by athletes from
+    that continent only. The server caps each response at ~200 rows
+    regardless of pageSize, so a global (unfiltered) pull only captures the
+    world top-200 for the year -- continentally-competitive swimmers who
+    aren't globally elite (e.g. many Asian Games-level swimmers) fall outside
+    that window entirely. Pulling additional region-filtered slices goes
+    deeper into each continent's own ranking instead.
+    """
+    url = _build_url(event, gender_code, year, page_size, region_id=region_id)
     last_err = None
     for attempt in range(1, max_retries + 1):
         try:
@@ -112,11 +122,13 @@ def fetch_rankings_csv(event: EventConfig, gender_code: str, year: str = "", pag
     raise IngestionError(f"Failed to fetch after {max_retries} attempts: {last_err}")
 
 
-def save_raw(text: str, event: EventConfig, gender_code: str, year: str) -> str:
+def save_raw(text: str, event: EventConfig, gender_code: str, year: str, region_id: str = "") -> str:
     """Persist the raw CSV response, never overwriting previous pulls."""
     os.makedirs(RAW_DATA_DIR, exist_ok=True)
     stamp = dt.datetime.now().strftime("%Y%m%dT%H%M%S")
     year_tag = year if year else "ALL"
+    if region_id:
+        year_tag = f"{year_tag}_{region_id}"
     fname = f"worldaquatics_{event.key}_{gender_code}_{year_tag}_{stamp}.csv"
     path = os.path.join(RAW_DATA_DIR, fname)
     with open(path, "w", encoding="utf-8", newline="") as f:
@@ -124,30 +136,42 @@ def save_raw(text: str, event: EventConfig, gender_code: str, year: str) -> str:
     return path
 
 
-def fetch_event_history(event: EventConfig, years_back: int = HISTORY_YEARS, page_size: int = 200):
+def fetch_event_history(event: EventConfig, years_back: int = HISTORY_YEARS, page_size: int = 200,
+                         extra_regions: list = None):
     """
     Fetch recent-years history for both genders for the given event.
 
-    Returns list of dicts: {gender_code, year, path, rows, status, message}
+    In addition to the global (world top-200) pull, also fetches a
+    region-filtered slice for each region in `extra_regions` (e.g. ["ASIA"])
+    so continentally-competitive swimmers who don't crack the global top-200
+    -- but would still contend at a continental championship like the Asian
+    Games -- are captured too. Defaults to config.settings.EXTRA_REGIONS.
+
+    Returns list of dicts: {gender_code, year, region, path, rows, status, message}
     """
+    from config.settings import EXTRA_REGIONS
+    extra_regions = extra_regions if extra_regions is not None else EXTRA_REGIONS
+
     current_year = dt.datetime.now().year
     years = [str(y) for y in range(current_year - years_back + 1, current_year + 1)]
+    region_slices = [""] + list(extra_regions)
     results = []
     for gender_code in GENDER_CODES.values():
         for year in years:
-            try:
-                text = fetch_rankings_csv(event, gender_code, year=year, page_size=page_size)
-                path = save_raw(text, event, gender_code, year)
-                n_rows = max(0, text.count("\n") - 1)
-                results.append({
-                    "gender": gender_code, "year": year, "path": path,
-                    "rows": n_rows, "status": "ok", "message": "",
-                })
-            except IngestionError as e:
-                results.append({
-                    "gender": gender_code, "year": year, "path": None,
-                    "rows": 0, "status": "failed", "message": str(e),
-                })
+            for region_id in region_slices:
+                try:
+                    text = fetch_rankings_csv(event, gender_code, year=year, page_size=page_size, region_id=region_id)
+                    path = save_raw(text, event, gender_code, year, region_id=region_id)
+                    n_rows = max(0, text.count("\n") - 1)
+                    results.append({
+                        "gender": gender_code, "year": year, "region": region_id or "GLOBAL", "path": path,
+                        "rows": n_rows, "status": "ok", "message": "",
+                    })
+                except IngestionError as e:
+                    results.append({
+                        "gender": gender_code, "year": year, "region": region_id or "GLOBAL", "path": None,
+                        "rows": 0, "status": "failed", "message": str(e),
+                    })
     return results
 
 

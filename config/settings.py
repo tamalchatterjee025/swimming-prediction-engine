@@ -20,6 +20,16 @@ WORLD_AQUATICS_API_BASE = "https://api.worldaquatics.com/fina/rankings/swimming/
 # Years of history to pull per ingestion run (most recent N years, per spec section 3).
 HISTORY_YEARS = 5
 
+# Additional per-continent ranking slices to pull alongside the global one.
+# The World Aquatics rankings API caps each response at ~200 rows regardless
+# of pageSize, so a global pull only reaches the world top-200 swims per year
+# -- continentally-competitive swimmers (e.g. many Asian Games-level
+# swimmers) who aren't globally elite fall outside that window entirely.
+# Valid values (from the site's own region filter): ASIA, EUROPE, AMERICAS,
+# AFRICA, OCEANIA. Defaults to ASIA since the app's first target competition
+# (Asian Games) needs that depth; add more as other competitions are added.
+EXTRA_REGIONS = ["ASIA"]
+
 MODEL_VERSION = "v0.1-mvp"
 
 # Monte Carlo simulation
